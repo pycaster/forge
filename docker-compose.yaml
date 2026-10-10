@@ -1,0 +1,53 @@
+services:
+  temporal:
+    image: temporalio/temporal:latest
+    ports:
+      - "7233:7233"
+      - "8233:8233"
+    volumes:
+      - temporal-data:/home/temporal
+    command: >-
+      server start-dev
+      --ip 0.0.0.0
+      --db-filename /home/temporal/temporal.db
+      --namespace agent
+
+  gateway:
+    build:
+      context: .
+      target: gateway
+    depends_on:
+      temporal:
+        condition: service_started
+    ports:
+      - "${GATEWAY_PORT:-8080}:${GATEWAY_PORT:-8080}"
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_NAMESPACE=agent
+      - CHANNEL=http
+      - GATEWAY_PORT=${GATEWAY_PORT:-8080}
+      - DEFAULT_APP=${DEFAULT_APP:-{"task_queue":"echo","workflow_type":"ChatWorkflow","proposal_workflow_type":"ProposalWorkflow"}}
+      - APP_ROUTES=${APP_ROUTES:-{}}
+      - LLM_BASE_URL=${LLM_BASE_URL:-}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_MODEL=${LLM_MODEL:-}
+    restart: unless-stopped
+
+  echo:
+    build:
+      context: .
+      target: echo
+    depends_on:
+      temporal:
+        condition: service_started
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_NAMESPACE=agent
+      - TASK_QUEUE=echo
+      - LLM_BASE_URL=${LLM_BASE_URL}
+      - LLM_API_KEY=${LLM_API_KEY}
+      - LLM_MODEL=${LLM_MODEL}
+    restart: unless-stopped
+
+volumes:
+  temporal-data:

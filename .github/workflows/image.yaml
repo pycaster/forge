@@ -1,0 +1,133 @@
+name: Platform images
+
+on:
+  pull_request:
+    paths: ['gateway/**', 'sdk/**', 'examples/echo/**', 'deploy/**', 'tests/**', 'scripts/**', 'Dockerfile', '.dockerignore', 'pyproject.toml', 'uv.lock', 'requirements.lock', 'docker-compose.yaml', '.github/workflows/image.yaml']
+  push:
+    branches: [main]
+    paths: ['gateway/**', 'sdk/**', 'examples/echo/**', 'deploy/**', 'tests/**', 'scripts/**', 'Dockerfile', '.dockerignore', 'pyproject.toml', 'uv.lock', 'requirements.lock', 'docker-compose.yaml', '.github/workflows/image.yaml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platform-images-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
+        with:
+          version: '0.12.13'
+          python-version: '3.12'
+      - run: uv sync --frozen --extra dev
+      - name: Check dependency export
+        run: |
+          uv export --frozen --no-dev --no-emit-project --output-file requirements.lock >/dev/null
+          git diff --exit-code -- requirements.lock
+      - run: uv run --frozen --extra dev pytest -q
+      - name: Render manifests
+        run: |
+          kubectl kustomize deploy/gateway > /tmp/gateway.yaml
+          kubectl kustomize examples/echo/deploy > /tmp/echo.yaml
+      - name: Validate Kubernetes schemas
+        run: |
+          go install github.com/yannh/kubeconform/cmd/kubeconform@v0.7.0
+          "$(go env GOPATH)/bin/kubeconform" -strict -summary /tmp/gateway.yaml /tmp/echo.yaml
+
+  image:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        include:
+          - target: gateway
+            image: forge
+          - target: echo
+            image: forge-echo
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Build and load for testing
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          platforms: linux/amd64
+          load: true
+          tags: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+      - name: Test final image
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:sha-${{ github.sha }}
+          TARGET: ${{ matrix.target }}
+        run: docker run --rm --read-only -i "$IMAGE" python - "$TARGET" < scripts/check_image.py
+      - name: Save tested image
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:sha-${{ github.sha }}
+        run: docker save "$IMAGE" -o /tmp/image.tar
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        with:
+          name: image-${{ matrix.image }}
+          path: /tmp/image.tar
+          retention-days: 1
+
+  publish:
+    needs: image
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      actions: read
+    strategy:
+      matrix:
+        image: [forge, forge-echo]
+    steps:
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Check for an existing release tag
+        id: existing
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:sha-${{ github.sha }}
+        run: |
+          if docker buildx imagetools inspect "$IMAGE" > /tmp/existing-image 2>/tmp/inspect-error; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            cat /tmp/existing-image >> "$GITHUB_STEP_SUMMARY"
+          elif grep -Eq 'not found|MANIFEST_UNKNOWN|manifest unknown|NAME_UNKNOWN|404' /tmp/inspect-error; then
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          else
+            cat /tmp/inspect-error >&2
+            exit 1
+          fi
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: steps.existing.outputs.found != 'true'
+        with:
+          name: image-${{ matrix.image }}
+          path: /tmp/tested-image
+      - name: Publish tested image
+        if: steps.existing.outputs.found != 'true'
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:sha-${{ github.sha }}
+        run: |
+          docker load -i /tmp/tested-image/image.tar
+          docker push "$IMAGE"
+          docker buildx imagetools inspect "$IMAGE" >> "$GITHUB_STEP_SUMMARY"

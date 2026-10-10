@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-gateway-config
+data:
+  TEMPORAL_ADDRESS: temporal:7233
+  TEMPORAL_NAMESPACE: agent
+  GATEWAY_TASK_QUEUE: gateway
+  DEFAULT_APP: '{"task_queue":"unconfigured","workflow_type":"UnconfiguredWorkflow"}'
+  APP_ROUTES: '{}'
+  TELEGRAM_ALLOWED_USERS: '[]'

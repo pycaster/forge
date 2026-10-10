@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-echo-config
+data:
+  TEMPORAL_ADDRESS: temporal:7233
+  TEMPORAL_NAMESPACE: agent
+  TASK_QUEUE: echo
+  LLM_BASE_URL: http://model:8000/v1
+  LLM_MODEL: configure-model

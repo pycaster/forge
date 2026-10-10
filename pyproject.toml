@@ -1,0 +1,32 @@
+[project]
+name = "forge"
+version = "0.2.0"
+description = "Agent platform: durable workflow gateway for AI-driven applications"
+requires-python = ">=3.12"
+dependencies = [
+    "temporalio>=1.9",
+    "python-telegram-bot>=21",
+    "openai>=1.50",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pyyaml>=6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["gateway", "sdk"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.17.0",
+]

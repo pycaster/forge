@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-echo
+  labels:
+    app.kubernetes.io/name: agent-echo
+    app.kubernetes.io/component: echo
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-echo
+      app.kubernetes.io/component: echo
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agent-echo
+        app.kubernetes.io/component: echo
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: echo
+        image: ghcr.io/pycaster/agent-platform-echo:configure-release
+        imagePullPolicy: IfNotPresent
+        envFrom:
+        - configMapRef:
+            name: agent-echo-config
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            memory: 512Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir:
+          sizeLimit: 32Mi

@@ -1,0 +1,15 @@
+**
+!requirements.lock
+!gateway/
+!gateway/*.py
+!sdk/
+!sdk/*.py
+!examples/
+!examples/echo/
+!examples/echo/*.py
+.env*
+**/.env*
+**/__pycache__
+.git
+.venv
+secrets
